@@ -1,114 +1,14 @@
 
-#nowarn "9"
-    
 #load "packages/FsLab/FsLab.fsx"
+#load "bitmapStuff.fsx"
 
-open System.Drawing
-
-
-let showBitmap (image:Image) =
-    let tempFileName = System.IO.Path.GetTempFileName() + ".bmp"
-    image.Save(tempFileName)
-    System.Diagnostics.Process.Start("chrome", "file:///" + tempFileName) |> ignore
-
-    
-    
-let rawImage = new Bitmap("sudoku.jpg")
-let newHeight = 200
-let scale = float newHeight / float rawImage.Height
-
-let smallImage = rawImage.GetThumbnailImage(int (float rawImage.Width * scale), newHeight, null, System.IntPtr.Zero) :?> Bitmap
-
-open System
 open MathNet.Numerics
 open MathNet.Numerics.LinearAlgebra
-open System.Drawing.Imaging 
-open Microsoft.FSharp.NativeInterop
+open bitmapStuff
 
-let getColor x =
-    Color.FromArgb(Convert.ToInt32(int16 (NativePtr.get x 2)),
-        Convert.ToInt32(int16 (NativePtr.get x 1)),
-        Convert.ToInt32(int16 (NativePtr.get x 0)),
-        Convert.ToInt32(int16 (NativePtr.get x 3)))
-        
-let setColor (c:Color) x =
-    NativePtr.set x 0 (byte c.R)
-    NativePtr.set x 1 (byte c.G)
-    NativePtr.set x 2 (byte c.B)
-    NativePtr.set x 3 (byte c.A)
 
-let floatToColor min max f =
-    let v =
-        match (min,max,f) with
-        | _,_,f when Double.IsNaN f -> 0
-        | min,max,_ when min = max -> 0
-        | min,_,f when f <= min -> 0
-        | _,max,f when f >= max -> 255
-        | _ ->
-        let scale = 255. / (max-min)
-        let fv = ((f-min) * scale)
-        int fv
-    
-    Color.FromArgb(v,v,v)
+let smallImage = scaledBitmap 400 "sudoku.jpg"
 
-let imageToMatrix (img:Bitmap) =
-    // lockbits on image so that the image can be processed quicker using unsafe means
-    let bd = img.LockBits(Rectangle(0,0,img.Width,img.Height),System.Drawing.Imaging.ImageLockMode.ReadOnly,System.Drawing.Imaging.PixelFormat.Format32bppArgb)
-
-    // pointer to use to go through the image
-    let mutable (p:nativeptr<byte>) = NativePtr.ofNativeInt (bd.Scan0)
-    let pixels = [
-        for i=0 to img.Height-1 do
-            for j=0 to img.Width-1 do
-                // Get the color of the [x,y] pixel
-                let colo = getColor p
-                // add the ARGB value to our list
-                let brightness = float(int colo.R + int colo.G + int colo.B) / 3. 
-                
-                yield i,j,float brightness
-                // move to the next pixel on the row
-                p <- NativePtr.add p 4
-            done
-            // The stride - the whole length (multiplied by four to account for the fact that we are looking at 4 byte pixels
-            p <- NativePtr.add p (bd.Stride - bd.Width*4)
-        done
-    ]
-    img.UnlockBits(bd)
-    DenseMatrix.ofSeqi img.Height img.Width pixels
-    
-let matrixToImage (mat:Matrix<float>) =
-    let min = Matrix.toSeq mat |> Seq.filter (Double.IsNaN >> not) |> Seq.min
-    let max = Matrix.toSeq mat |> Seq.filter (Double.IsNaN >> not) |> Seq.max
-    
-    let img = new Bitmap(mat.ColumnCount, mat.RowCount)
-    
-    // lockbits on image so that the image can be processed quicker using unsafe means
-    let bd = img.LockBits(Rectangle(0,0,img.Width,img.Height),System.Drawing.Imaging.ImageLockMode.WriteOnly,System.Drawing.Imaging.PixelFormat.Format32bppArgb)
-
-    // pointer to use to go through the image
-    let mutable (p:nativeptr<byte>) = NativePtr.ofNativeInt (bd.Scan0)
-    for i=0 to img.Height-1 do
-        for j=0 to img.Width-1 do
-            let brightness = mat.[i,j]
-            let colo = floatToColor min max brightness
-            
-            setColor colo p
-            
-            // move to the next pixel on the row
-            p <- NativePtr.add p 4
-        done
-        // The stride - the whole length (multiplied by four to account for the fact that we are looking at 4 byte pixels
-        p <- NativePtr.add p (bd.Stride - bd.Width*4)
-    done
-    img.UnlockBits(bd)
-    img
- 
-
-let show img =
-    match box img with 
-    | :? Bitmap as b -> showBitmap b
-    | :? Matrix<float> as m -> m |> matrixToImage |> showBitmap
-    | _ -> ()
     
 let convolve kernel m =
     let kernelXLength = Matrix.columnCount kernel
@@ -136,17 +36,34 @@ let convolve kernel m =
             ] |> List.sum
         )
 
+let matrixMap2 mapping m1 m2 =
+    if Matrix.columnCount m1 <> Matrix.columnCount m2 then failwith "Columns don't match"
+    if Matrix.rowCount m1 <> Matrix.rowCount m2 then failwith "Rows don't match"
+    
+    Matrix.mapi (fun y x v ->
+        mapping v m2.[y,x]) m1
 
 let m = imageToMatrix smallImage
 
 let newImg = matrixToImage m
 
-// smallImage |> show
-// m |> show
+let gaussian5 = matrix [[2.;4.;5.;4.;2.];[4.;9.;12.;9.;4.];[5.;12.;15.;12.;5.];[4.;9.;12.;9.;4.];[2.;4.;5.;4.;2.];] / 159.
+let edgeV3 = matrix [[1.;2.;1.];[0.;0.;0.];[-1.;-2.;-1.]]
+let edgeH3 = matrix [[-1.;0.;1.];[-2.;0.;2.];[-1.;0.;1.]]
+let edgeV5 = matrix [[1.;2.;1.];[0.;0.;0.];[-1.;-2.;-1.]]
+let edgeH5 = matrix [[-1.;0.;1.];[-2.;0.;2.];[-1.;0.;1.]]
 
-let edge1 = matrix [[1.;2.;1.];[0.;0.;0.];[-1.;-2.;-1.]]
+let filtered = m |> convolve gaussian5
 
-let e = convolve edge1 m
+let eV = filtered |> convolve edgeV3
+let eH = filtered |> convolve edgeH3
 
-e |> show
+let e = matrixMap2 complex eH eV
 
+e
+|> Matrix.map Complex.magnitude
+|> show
+
+smallImage |> show
+eV |> show
+eH |> show
