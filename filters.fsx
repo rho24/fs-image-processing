@@ -43,10 +43,41 @@ let nonMaximumSuppression m =
         | _ (*Lt 0.25 or Gt 0.75*) -> isMaximumOrZero sub.[0,1] sub.[2,1] v
         )
 
+let hysteresis low high (m:Matrix<float>) =
+    let xLength = Matrix.columnCount m
+    let yLength = Matrix.rowCount m
+    let result = DenseMatrix.create yLength xLength nan
+    let rec spread y x =
+        match (y,x) with
+        | y,x when y < 0 || y >= yLength || x < 0 || x >= xLength -> ()
+        | _ ->
+        match result.[y,x] with
+        | 1.0|0.0 -> ()
+        | _ ->
+        match m.[y,x] with
+        | v when System.Double.IsNaN v || v < low -> result.[y,x] <- 0.0
+        | v when v < high -> ()
+        | v (*v >= high*) ->
+        result.[y,x] <- 1.0
+        spread (y-1) (x-1)
+        spread (y-1) (x)
+        spread (y-1) (x+1)
+        spread (y) (x-1)
+        spread (y) (x+1)
+        spread (y+1) (x-1)
+        spread (y+1) (x)
+        spread (y+1) (x+1)
+         
+    m
+    |> Matrix.iteri (fun y x v -> spread y x)
+    result |> Matrix.map (fun v -> if System.Double.IsNaN v then 0.0 else v)
+
 let canny m =
     let filtered = m |> convolve gaussian5
     let eX = filtered |> convolve edgeV3
     let eY = filtered |> convolve edgeH3
     let e = matrixMap2 complex eX eY
-    let suppressedE = e |> nonMaximumSuppression
-    suppressedE |> Matrix.map Complex.magnitude
+    e 
+    |> nonMaximumSuppression
+    |> Matrix.map Complex.magnitude
+    |> hysteresis 20. 40.
