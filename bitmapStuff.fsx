@@ -2,7 +2,10 @@ module bitmapStuff
 
 #nowarn "9"
 
-#load "packages/FsLab/FsLab.fsx"
+#I "packages/MathNet.Numerics/lib/net40"
+#I "packages/MathNet.Numerics.FSharp/lib/net40"
+#r "MathNet.Numerics.dll"
+#r "MathNet.Numerics.FSharp.dll"
 
 open System
 open System.Drawing

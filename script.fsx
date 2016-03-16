@@ -9,6 +9,6 @@ open bitmapStuff
 open matrixStuff
 open filters
 
-let m = scaledBitmap 400 "sudoku.jpg" |> imageToMatrix
+let m = scaledBitmap 800 "sudoku.jpg" |> imageToMatrix
 
 m |> canny |> show

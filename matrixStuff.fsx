@@ -1,17 +1,25 @@
 module matrixStuff
 
-#load "packages/FsLab/FsLab.fsx"
+#I "packages/MathNet.Numerics/lib/net40"
+#I "packages/MathNet.Numerics.FSharp/lib/net40"
+#r "MathNet.Numerics.dll"
+#r "MathNet.Numerics.FSharp.dll"
 
 open MathNet.Numerics
 open MathNet.Numerics.LinearAlgebra
-   
-let convolve kernel m =
-    let kernelXLength = Matrix.columnCount kernel
-    let kernelYLength = Matrix.rowCount kernel
-    if kernelYLength % 2 = 0 then failwith "height must be odd"
-    if kernelXLength % 2 = 0 then failwith "width must be odd"
-    let xMargin = (kernelXLength - 1) / 2
-    let yMargin = (kernelYLength - 1) / 2
+
+let matrixSub height width y x (m:Matrix<'a>) =
+    if height % 2 = 0 then failwith "height must be odd"
+    if width % 2 = 0 then failwith "width must be odd"
+    let xMargin = (height - 1) / 2
+    let yMargin = (width - 1) / 2
+    m.SubMatrix(y-yMargin, height, x-xMargin, width)
+    
+let matrixMapSubs height width nan mapping m =
+    if height % 2 = 0 then failwith "height must be odd"
+    if width % 2 = 0 then failwith "width must be odd"
+    let xMargin = (height - 1) / 2
+    let yMargin = (width - 1) / 2
     let xLength = Matrix.columnCount m
     let yLength = Matrix.rowCount m
     m
@@ -22,13 +30,17 @@ let convolve kernel m =
         | (_,y) when y < yMargin               -> nan
         | (_,y) when yLength - yMargin - 1 < y -> nan
         | _ -> 
-            [
-                for i= -yMargin to yMargin do
-                    for j= -xMargin to xMargin do
-                        yield m.[y+i,x+j] * kernel.[yMargin + i,xMargin + j]
-                    done
-                done
-            ] |> List.sum
+            let subM = matrixSub height width y x m
+            mapping y x subM
+        )
+
+ 
+let convolve kernel m =
+    let kernelXLength = Matrix.columnCount kernel
+    let kernelYLength = Matrix.rowCount kernel
+    m |> matrixMapSubs kernelYLength kernelXLength nan (fun y x sub ->
+        let temp = Matrix.op_DotMultiply (kernel,sub)
+        Matrix.sum temp
         )
 
 let matrixMap2 mapping m1 m2 =
